@@ -16,16 +16,16 @@ if not MONGO_URI:
     )
 
 # ----------------------------------------
-# Connect to MongoDB Atlas
+# Connect to MongoDB via Docker
 # ----------------------------------------
 try:
     client = MongoClient(MONGO_URI)
     db = client["veinpay_db"]     
     users_collection = db["users"]
-    print("[MongoDB Atlas] Connected successfully!")
+    print("[MongoDB via Docker] Connected successfully!")
 
 except ConnectionFailure as e:
-    print("[MongoDB Atlas] Connection failed:", e)
+    print("[MongoDB via Docker] Connection failed:", e)
     raise e
 
 
