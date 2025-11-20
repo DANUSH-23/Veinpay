@@ -2,72 +2,76 @@ import streamlit as st
 import requests
 from PIL import Image
 import io
-from config import load_env
-
-config = load_env()
-BACKEND_URL = config["BACKEND_URL"]
-
+from config import BACKEND_URL
 
 def show_register_page():
-    st.markdown("<div class='page-title'>Register User</div>", unsafe_allow_html=True)
-    st.markdown("<div class='sub-text'>Enroll a new palm-vein signature.</div>", unsafe_allow_html=True)
+
+    st.markdown("<div class='page-title'>User Registration</div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='sub-text'>Upload 3–5 vein images for stronger, more accurate biometric registration.</div>", 
+        unsafe_allow_html=True
+    )
 
     st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
 
-    col1, col2 = st.columns([1.3, 1])
+    st.markdown("<div class='section-label'>Enter User ID</div>", unsafe_allow_html=True)
+    user_id = st.text_input("User ID", placeholder="Enter unique user ID")
 
-    with col1:
-        user_id = st.text_input("User ID")
+    st.markdown("<br><div class='section-label'>Upload 3–5 Images</div>", unsafe_allow_html=True)
 
-        mode = st.radio("Choose Method", ["Upload Image", "Use Camera"])
+    uploaded_files = st.file_uploader(
+        "Upload multiple sample images",
+        type=["jpg", "jpeg", "png"],
+        accept_multiple_files=True
+    )
 
-        img = None
-        if mode == "Upload Image":
-            uploaded_file = st.file_uploader("Upload palm image", type=["jpg", "jpeg", "png"])
-            if uploaded_file:
-                img = Image.open(uploaded_file)
-        else:
-            camera = st.camera_input("Capture Image")
-            if camera:
-                img = Image.open(camera)
+    st.markdown("<div class='section-label'>Optional: Capture using Camera</div>", unsafe_allow_html=True)
 
-        if img:
-            st.session_state["reg_preview"] = img
+    camera_img = st.camera_input("Capture from camera")
 
-        if st.button("Register"):
-            if not user_id:
-                st.error("User ID required.")
-                return
-            if img is None:
-                st.error("Image required.")
-                return
+    if camera_img:
+        # Convert camera image to UploadedFile-like object
+        uploaded_files.append(camera_img)
 
-            buffer = io.BytesIO()
-            img.save(buffer, format="JPEG")
-            buffer.seek(0)
+    st.markdown("<br>", unsafe_allow_html=True)
 
-            files = {"file": ("upload.jpg", buffer, "image/jpeg")}
+    if st.button("Register User"):
+        if not user_id:
+            st.error("Please enter a User ID.")
+            return
 
-            with st.spinner("Processing & extracting vein embedding..."):
-                resp = requests.post(
-                    f"{BACKEND_URL}/register",
-                    params={"user_id": user_id},
-                    files=files,
-                    timeout=90
+        if not uploaded_files or len(uploaded_files) < 3:
+            st.error("Please upload at least 3 images for robust registration.")
+            return
+
+        # 3–5 enforced
+        if len(uploaded_files) > 5:
+            st.warning("Only first 5 images will be used.")
+            uploaded_files = uploaded_files[:5]
+
+        with st.spinner("Processing and registering user..."):
+            files = []
+            for img in uploaded_files:
+                img_bytes = img.read()
+                files.append(
+                    ("files", (img.name, img_bytes, img.type))
                 )
 
-                if resp.status_code == 200:
-                    st.success("User Registered Successfully!")
-                    st.json(resp.json())
-                else:
-                    st.error("Registration failed.")
-                    st.code(resp.text)
+            response = requests.post(
+                f"{BACKEND_URL}/register",
+                data={"user_id": user_id},
+                files=files
+            )
 
-    with col2:
-        st.markdown("<p class='section-label'>Preview</p>", unsafe_allow_html=True)
-        if "reg_preview" in st.session_state:
-            st.image(st.session_state["reg_preview"], use_container_width=True)
-        else:
-            st.markdown("<p class='placeholder-text'>No image selected.</p>", unsafe_allow_html=True)
+            if response.status_code == 200:
+                res = response.json()
+                st.success(f"User '{user_id}' registered successfully!")
+                st.json(res)
+            else:
+                st.error("Registration failed.")
+                try:
+                    st.json(response.json())
+                except:
+                    st.write("No valid JSON returned.")
 
     st.markdown("</div>", unsafe_allow_html=True)
