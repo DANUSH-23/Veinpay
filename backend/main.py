@@ -1,119 +1,105 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import numpy as np
 import cv2
-from typing import List
+from sklearn.metrics.pairwise import cosine_similarity
 
 from backend.utils.preprocess import preprocess_image
 from backend.utils.extract_vein import extract_vein_pattern
 from backend.utils.mobilenet import get_embedding
 from backend.db.database import save_user_embedding, get_user_embedding
 
-from sklearn.metrics.pairwise import cosine_similarity
-
 
 app = FastAPI(
     title="VeinPay Authentication API",
-    description="Backend for Vein-Based Biometric Authentication",
-    version="2.0"
+    version="1.0",
+    description="Single-image vein registration and matching backend"
 )
 
-# -------------------------------------------------
 # CORS
-# -------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# -------------------------------------------------
-# Root
-# -------------------------------------------------
+
 @app.get("/")
 def root():
-    return {"status": "VeinPay backend running successfully"}
+    return {"message": "VeinPay backend running"}
 
 
-# -------------------------------------------------
-# Multi-Sample Registration Endpoint
-# -------------------------------------------------
+# ----------------------------------------------------
+# Register (SINGLE IMAGE)
+# ----------------------------------------------------
 @app.post("/register")
-async def register(user_id: str, files: List[UploadFile] = File(...)):
+async def register(
+    user_id: str = Query(..., description="Unique user ID"),
+    file: UploadFile = File(...)
+):
+
     try:
-        user_id = user_id.strip()
-        if len(files) < 1:
-            raise HTTPException(status_code=400, detail="Upload at least one image")
+        # Read bytes
+        image_bytes = await file.read()
+        np_img = np.frombuffer(image_bytes, np.uint8)
 
-        embeddings = []
+        img = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
+        if img is None:
+            raise HTTPException(400, "Could not decode image")
 
-        for file in files:
-            image_bytes = await file.read()
-            np_img = np.frombuffer(image_bytes, np.uint8)
-            img = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
+        # Preprocess
+        gray = preprocess_image(img)
 
-            if img is None:
-                raise HTTPException(status_code=400, detail="Invalid image uploaded")
+        # Extract vein pattern
+        _, gabor_out, _ = extract_vein_pattern(gray)
 
-            # 1. Preprocess
-            pre_img = preprocess_image(img)
-            skeleton, gabor_img, thresh_img = extract_vein_pattern(pre_img)
+        # MobileNet embedding
+        embedding = get_embedding(gabor_out).tolist()
 
-            # 2. Generate embedding
-            emb = get_embedding(gabor_img)
-            embeddings.append(emb)
-
-        # Average embedding from 3–5 samples
-        final_embedding = np.mean(embeddings, axis=0).tolist()
-
-        # Save to MongoDB
-        save_user_embedding(user_id, final_embedding)
+        # Store in DB
+        save_user_embedding(user_id, embedding)
 
         return {
             "success": True,
-            "message": f"User '{user_id}' registered with {len(files)} samples.",
-            "samples_used": len(files)
+            "user_id": user_id,
+            "embedding_length": len(embedding),
+            "message": "User registered successfully"
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, f"Registration failed: {str(e)}")
 
 
-# -------------------------------------------------
-# Match Endpoint (Single Image)
-# -------------------------------------------------
+# ----------------------------------------------------
+# Match Endpoint
+# ----------------------------------------------------
 @app.post("/match")
-async def match(user_id: str, file: UploadFile = File(...)):
-    try:
-        user_id = user_id.strip()
+async def match(
+    user_id: str = Query(...),
+    file: UploadFile = File(...)
+):
 
+    try:
+        stored = get_user_embedding(user_id)
+        if stored is None:
+            raise HTTPException(404, "User not found")
+
+        # Process uploaded image
         image_bytes = await file.read()
         np_img = np.frombuffer(image_bytes, np.uint8)
         img = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
 
         if img is None:
-            raise HTTPException(status_code=400, detail="Invalid image file")
+            raise HTTPException(400, "Could not decode image")
 
-        # 1. Extract features
-        pre_img = preprocess_image(img)
-        skeleton, gabor_img, thresh_img = extract_vein_pattern(pre_img)
+        gray = preprocess_image(img)
+        _, gabor_out, _ = extract_vein_pattern(gray)
+        emb_new = get_embedding(gabor_out)
 
-        # 2. Convert to embedding
-        embedding = get_embedding(gabor_img)
+        stored = np.array(stored, dtype=np.float32)
 
-        # 3. Retrieve stored embedding
-        stored_emb = get_user_embedding(user_id)
-        if stored_emb is None:
-            raise HTTPException(status_code=404, detail="User not found")
-
-        stored_emb = np.array(stored_emb, dtype=np.float32)
-
-        # 4. Compute similarity
-        similarity = float(cosine_similarity([embedding], [stored_emb])[0][0])
-
-        # 5. Thresholding
+        similarity = float(cosine_similarity([emb_new], [stored])[0][0])
         match_result = similarity >= 0.75
 
         return {
@@ -123,4 +109,4 @@ async def match(user_id: str, file: UploadFile = File(...)):
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, f"Matching failed: {str(e)}")
