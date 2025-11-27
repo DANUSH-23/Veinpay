@@ -45,7 +45,7 @@ def extract_vein_pattern(gray_img: np.ndarray):
     # ----------------------------
     # 3. Skeletonization
     # ----------------------------
-    size = np.size(thresh)
+    size = np.size(thresh)  # noqa: F841
     skeleton = np.zeros(thresh.shape, np.uint8)
 
     element = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
