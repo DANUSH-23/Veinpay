@@ -1,77 +1,78 @@
 import streamlit as st
 import requests
-from PIL import Image
-import io
 from config import BACKEND_URL
+
 
 def show_register_page():
 
     st.markdown("<div class='page-title'>User Registration</div>", unsafe_allow_html=True)
     st.markdown(
-        "<div class='sub-text'>Upload 3–5 vein images for stronger, more accurate biometric registration.</div>", 
+        "<div class='sub-text'>Upload a single vein image or capture using camera for registration.</div>",
         unsafe_allow_html=True
     )
 
     st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
 
+    # -----------------------------
+    # USER ID INPUT
+    # -----------------------------
     st.markdown("<div class='section-label'>Enter User ID</div>", unsafe_allow_html=True)
     user_id = st.text_input("User ID", placeholder="Enter unique user ID")
 
-    st.markdown("<br><div class='section-label'>Upload 3–5 Images</div>", unsafe_allow_html=True)
-
-    uploaded_files = st.file_uploader(
-        "Upload multiple sample images",
+    # -----------------------------
+    # FILE UPLOAD
+    # -----------------------------
+    st.markdown("<br><div class='section-label'>Upload Image</div>", unsafe_allow_html=True)
+    uploaded_file = st.file_uploader(
+        "Upload a single vein image",
         type=["jpg", "jpeg", "png"],
-        accept_multiple_files=True
+        accept_multiple_files=False
     )
 
-    st.markdown("<div class='section-label'>Optional: Capture using Camera</div>", unsafe_allow_html=True)
-
+    # -----------------------------
+    # CAMERA INPUT
+    # -----------------------------
+    st.markdown("<div class='section-label'>Or Capture Using Camera</div>", unsafe_allow_html=True)
     camera_img = st.camera_input("Capture from camera")
 
-    if camera_img:
-        # Convert camera image to UploadedFile-like object
-        uploaded_files.append(camera_img)
+    # Final image priority → camera first
+    final_image_file = camera_img if camera_img else uploaded_file
 
     st.markdown("<br>", unsafe_allow_html=True)
 
+    # -----------------------------
+    # REGISTER BUTTON ACTION
+    # -----------------------------
     if st.button("Register User"):
-        if not user_id:
+
+        if not user_id.strip():
             st.error("Please enter a User ID.")
             return
 
-        if not uploaded_files or len(uploaded_files) < 3:
-            st.error("Please upload at least 3 images for robust registration.")
+        if final_image_file is None:
+            st.error("Please upload or capture an image.")
             return
 
-        # 3–5 enforced
-        if len(uploaded_files) > 5:
-            st.warning("Only first 5 images will be used.")
-            uploaded_files = uploaded_files[:5]
-
         with st.spinner("Processing and registering user..."):
-            files = []
-            for img in uploaded_files:
-                img_bytes = img.read()
-                files.append(
-                    ("files", (img.name, img_bytes, img.type))
-                )
 
+            # Convert image to bytes
+            img_bytes = final_image_file.getvalue()
+
+            # Send to backend
             response = requests.post(
                 f"{BACKEND_URL}/register",
-                data={"user_id": user_id},
-                files=files
+                params={"user_id": user_id},   # <-- CORRECT for backend
+                files={"file": ("image.jpg", img_bytes, "image/jpeg")}
             )
 
             if response.status_code == 200:
-                res = response.json()
                 st.success(f"User '{user_id}' registered successfully!")
-                st.json(res)
+                st.json(response.json())
             else:
                 st.error("Registration failed.")
                 try:
                     st.json(response.json())
                 except:
-                    st.write("No valid JSON returned.")
+                    st.write("No valid JSON returned from backend.")
 
     st.markdown("</div>", unsafe_allow_html=True)

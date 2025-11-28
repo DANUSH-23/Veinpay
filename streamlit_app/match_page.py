@@ -1,63 +1,117 @@
 import streamlit as st
 import requests
-from PIL import Image
-import numpy as np
-import io
 from config import BACKEND_URL
+
 
 def show_match_page():
     st.markdown("<div class='page-title'>Match Verification</div>", unsafe_allow_html=True)
-    st.markdown("<div class='sub-text'>Upload an image to verify identity using vein biometrics.</div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='sub-text'>Upload or capture an image to verify identity using vein biometrics.</div>",
+        unsafe_allow_html=True
+    )
 
-    with st.container():
-        st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
 
-        user_id = st.text_input("Enter User ID", placeholder="example: anand").strip()
+    # -----------------------------
+    # USER ID INPUT
+    # -----------------------------
+    st.markdown("<div class='section-label'>Enter User ID</div>", unsafe_allow_html=True)
+    user_id = st.text_input("User ID", placeholder="example: anand").strip()
 
-        uploaded_file = st.file_uploader("Upload Image", type=["jpg", "jpeg", "png"])
+    # -----------------------------
+    # FILE UPLOAD
+    # -----------------------------
+    st.markdown("<br><div class='section-label'>Upload Image</div>", unsafe_allow_html=True)
+    uploaded_file = st.file_uploader(
+        "Upload an image for matching",
+        type=["jpg", "jpeg", "png"],
+        accept_multiple_files=False
+    )
 
-        # CAMERA INPUT
-        cam_img = st.camera_input("Or capture using camera")
+    # -----------------------------
+    # CAMERA INPUT
+    # -----------------------------
+    st.markdown("<div class='section-label'>Or Capture Using Camera</div>", unsafe_allow_html=True)
+    camera_img = st.camera_input("Capture from camera")
 
-        if cam_img:
-            image_bytes = cam_img.getvalue()
-        elif uploaded_file:
-            image_bytes = uploaded_file.read()
-        else:
-            image_bytes = None
+    # Priority: Camera first, then upload
+    final_image_file = camera_img if camera_img else uploaded_file
 
-        if st.button("Match Now"):
-            if not user_id:
-                st.error("Please enter a User ID!")
-            elif not image_bytes:
-                st.error("Please upload or capture an image!")
-            else:
-                files = {
-                    "file": ("image.jpg", image_bytes, "image/jpeg")
-                }
+    st.markdown("<br>", unsafe_allow_html=True)
 
-                try:
-                    response = requests.post(
-                        f"{BACKEND_URL}/match",
-                        params={"user_id": user_id},
-                        files=files
-                    )
+    # -----------------------------
+    # MATCH BUTTON
+    # -----------------------------
+    if st.button("Match Now"):
 
-                    if response.status_code == 200:
-                        data = response.json()
+        if not user_id:
+            st.error("Please enter a User ID.")
+            return
 
-                        similarity = round(data.get("similarity", 0.0), 4)
-                        match = data.get("match", False)
+        if final_image_file is None:
+            st.error("Please upload or capture an image.")
+            return
 
-                        if match:
-                            st.success(f"✅ MATCH SUCCESSFUL — Similarity: {similarity}")
-                        else:
-                            st.error(f"❌ NO MATCH — Similarity: {similarity}")
+        with st.spinner("Matching... please wait."):
 
+            # Convert image → bytes
+            img_bytes = final_image_file.getvalue()
+
+            files = {
+                "file": ("image.jpg", img_bytes, "image/jpeg")
+            }
+
+            try:
+                response = requests.post(
+                    f"{BACKEND_URL}/match",
+                    params={"user_id": user_id},    # correct for backend
+                    files=files
+                )
+
+                if response.status_code == 200:
+                    result = response.json()
+
+                    similarity = float(result.get("similarity", 0.0))
+                    match_status = bool(result.get("match", False))
+
+                    # -------------------------
+                    # MATCH SUCCESS
+                    # -------------------------
+                    if match_status:
+                        st.success(f"Match Successful")
+                        st.markdown(
+                            f"""
+                            <div class="glass-card" style="border-left: 4px solid #10b981; padding: 15px;">
+                                <h4 style='color:#10b981;'>MATCH FOUND</h4>
+                                <p>Similarity Score: <b>{round(similarity, 4)}</b></p>
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+
+                    # -------------------------
+                    # MATCH FAILED
+                    # -------------------------
                     else:
-                        st.error(f"Error: {response.status_code} — {response.text}")
+                        st.error("No Match Found")
+                        st.markdown(
+                            f"""
+                            <div class="glass-card" style="border-left: 4px solid #ef4444; padding: 15px;">
+                                <h4 style='color:#ef4444;'>MATCH FAILED</h4>
+                                <p>Similarity Score: <b>{round(similarity, 4)}</b></p>
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
 
-                except Exception as e:
-                    st.error(f"Request failed: {e}")
+                else:
+                    st.error(f"Error {response.status_code}")
+                    try:
+                        st.json(response.json())
+                    except:
+                        st.write(response.text)
 
-        st.markdown("</div>", unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"Request failed: {e}")
+
+    st.markdown("</div>", unsafe_allow_html=True)

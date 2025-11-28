@@ -1,30 +1,25 @@
 import cv2
 import numpy as np
 
-def preprocess_image(image_bytes):
+def preprocess_image(image: np.ndarray) -> np.ndarray:
     """
-    Converts input image bytes into a clean preprocessed grayscale image.
+    Takes a decoded RGB/BGR image and converts to a cleaned grayscale image.
     Steps:
-    - Decode bytes
-    - Convert BGR → Gray
-    - Resize to fixed size
-    - Apply histogram equalization
+    - BGR → Gray
+    - Resize to 224×224
+    - Histogram equalization
     """
 
-    # Convert uploaded bytes to NumPy array
-    nparr = np.frombuffer(image_bytes, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if image is None:
+        raise ValueError("Input image is None in preprocess_image")
 
-    if img is None:
-        raise ValueError("Invalid image data.")
+    # Convert BGR → Gray
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    # Convert to grayscale
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    # Resize for consistency (MobileNetV2 expects fixed inputs)
+    # Resize for consistency
     resized = cv2.resize(gray, (224, 224))
 
-    # Enhance contrast
+    # Histogram equalization
     eq = cv2.equalizeHist(resized)
 
     return eq
